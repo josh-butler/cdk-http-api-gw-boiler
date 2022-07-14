@@ -1,4 +1,4 @@
-import { Duration, Stack, StackProps } from 'aws-cdk-lib';
+import { Duration, Fn, Stack, StackProps, aws_iam as iam } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 import {Runtime} from 'aws-cdk-lib/aws-lambda';
@@ -14,6 +14,10 @@ import {HttpLambdaIntegration} from '@aws-cdk/aws-apigatewayv2-integrations-alph
 export class CdkHttpApiGwBoilerStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
+
+    // ==== Params ====
+    const dbSecretArn = Fn.importValue('db-secret-arn');
+    const dbClusterArn = Fn.importValue('db-cluster-arn');
 
     // ==== API Gateway ====
     const httpApi = new HttpApi(this, 'http-api-example', {
@@ -32,6 +36,19 @@ export class CdkHttpApiGwBoilerStack extends Stack {
       },
     });
 
+    // ==== IAM ====
+    const secretReadPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      resources: [dbSecretArn.toString()],
+      actions: ['secretsmanager:GetSecretValue'],
+    });
+
+    const rdsDataExecPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      resources: [dbClusterArn.toString()],
+      actions: ['rds-data:ExecuteStatement'],
+    });
+
     // ==== Lambda ====
     const statusGetLambda = new NodejsFunction(this, 'StatusGet', {
       memorySize: 128,
@@ -39,11 +56,22 @@ export class CdkHttpApiGwBoilerStack extends Stack {
       runtime: Runtime.NODEJS_14_X,
       handler: 'handler',
       entry: './src/handlers/status-get.js',
+      environment: {
+        DB_NAME: 'wave',
+        DB_SECRET_ARN: dbSecretArn.toString(),
+        DB_CLUSTER_ARN: dbClusterArn.toString(),
+      },
       bundling: {
         minify: true,
         externalModules: ['aws-sdk'],
       },
     });
+    statusGetLambda.addToRolePolicy(secretReadPolicy);
+    statusGetLambda.addToRolePolicy(rdsDataExecPolicy);
+    statusGetLambda.addPermission('rds', {
+      principal: new iam.ServicePrincipal('rds.amazonaws.com'),
+      action: 'lambda:InvokeFunction',
+  });
 
     // GET /status
     httpApi.addRoutes({
