@@ -46,7 +46,13 @@ export class CdkHttpApiGwBoilerStack extends Stack {
     const rdsDataExecPolicy = new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       resources: [dbClusterArn.toString()],
-      actions: ['rds-data:ExecuteStatement'],
+      actions: [
+        'rds-data:BatchExecuteStatement',
+        'rds-data:BeginTransaction',
+        'rds-data:CommitTransaction',
+        'rds-data:ExecuteStatement',
+        'rds-data:RollbackTransaction',
+      ],
     });
 
     // ==== Lambda ====
