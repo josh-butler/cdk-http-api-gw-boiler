@@ -1,4 +1,13 @@
-import { Duration, Fn, Stack, StackProps, aws_iam as iam } from 'aws-cdk-lib';
+import { 
+  Duration,
+  Fn,
+  Stack,
+  StackProps,
+  RemovalPolicy,
+  aws_iam as iam,
+  aws_s3 as s3,
+  aws_dynamodb as dynamodb,
+} from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 import {Runtime} from 'aws-cdk-lib/aws-lambda';
@@ -55,6 +64,21 @@ export class CdkHttpApiGwBoilerStack extends Stack {
       ],
     });
 
+    // ==== S3 ====
+    const assetBucket = new s3.Bucket(this, 'AssetBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    // ==== DynamoDB ====
+    const entityTable = new dynamodb.Table(this, 'EntityTable', {
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY, // set RETAIN for prod?
+      pointInTimeRecovery: false, // set true for prod?
+      partitionKey: {name: 'pk', type: dynamodb.AttributeType.STRING},
+      sortKey: {name: 'sk', type: dynamodb.AttributeType.STRING},
+    });
+
     // ==== Lambda ====
     const statusGetLambda = new NodejsFunction(this, 'StatusGet', {
       memorySize: 128,
@@ -66,6 +90,8 @@ export class CdkHttpApiGwBoilerStack extends Stack {
         DB_NAME: 'wave',
         DB_SECRET_ARN: dbSecretArn.toString(),
         DB_CLUSTER_ARN: dbClusterArn.toString(),
+        TABLE_NAME: entityTable.tableName,
+        ASSET_BUCKET: assetBucket.bucketName,
       },
       bundling: {
         minify: true,
@@ -77,7 +103,9 @@ export class CdkHttpApiGwBoilerStack extends Stack {
     statusGetLambda.addPermission('rds', {
       principal: new iam.ServicePrincipal('rds.amazonaws.com'),
       action: 'lambda:InvokeFunction',
-  });
+    });
+    entityTable.grantReadWriteData(statusGetLambda);
+    assetBucket.grantReadWrite(statusGetLambda);
 
     // GET /status
     httpApi.addRoutes({
